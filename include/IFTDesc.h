@@ -23,13 +23,30 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
-#include <opencv2/xfeatures2d.hpp>
+#include <opencv2/features2d.hpp>
 #include <bitset>
+
+#include <filesystem>
 
 #define HASH_P 116101
 #define MAX_N 10000000000
 #define MAX_FRAME_N 20000
 extern std::string output_path;
+
+struct ComparePixels {
+    bool operator()(const Eigen::Array2i &lhs, const Eigen::Array2i &rhs) const {
+        return lhs.x() < rhs.x() || (lhs.x() == rhs.x() && lhs.y() < rhs.y());
+    }
+};
+using PointGridType = std::map<Eigen::Array2i, std::vector<double>, ComparePixels>;
+
+struct BEVResult {
+    Eigen::MatrixXd avg_z_matrix;         // 平均 Z 值矩阵
+    Eigen::MatrixXi density_matrix;      // 密度矩阵
+    Eigen::Array2i lower_bound;          // 下边界
+    Eigen::Array2i upper_bound;          // 上边界
+};
+
 
 typedef struct ConfigSetting {
   /* for point cloud pre-preocess*/
@@ -43,6 +60,9 @@ typedef struct ConfigSetting {
   int BEV_Y_MAX = 60;
   double lidar_height = 1.5;
   double height_bin = 0.3;
+  double Density_resolution = 0.5;
+  double Density_threshold = 0.05;
+  bool use_global_bev = true;
   /* feature extraction */
   double image_quartity = 0.2;
   int Hamming_distance = 10;
@@ -224,6 +244,10 @@ public:
     BEV_Y_MAX = config_setting.BEV_Y_MAX;
     lidar_height = config_setting.lidar_height;
     height_bin = config_setting.height_bin;
+    Density_resolution = config_setting.Density_resolution;
+    Density_threshold = config_setting.Density_threshold;
+    use_global_bev = config_setting.use_global_bev;
+
     image_quartity = config_setting.image_quartity;
     Hamming_distance = config_setting.Hamming_distance;
   };
@@ -235,6 +259,9 @@ public:
   double BEV_Y_MAX; 
   double lidar_height;
   double height_bin;
+  double Density_resolution;
+  double Density_threshold;
+  bool use_global_bev;
   double image_quartity;
   int Hamming_distance;
 
@@ -245,7 +272,7 @@ public:
   std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> world_poses;
 
 
-  //time co
+  //time cost
   std::vector<double> candidate_selector_time;
   std::vector<double> candidate_verify_time;
   // hash table, save all descriptors
@@ -297,6 +324,8 @@ private:
                        Eigen::Matrix3d &rot);
   //
   std::pair<Eigen::MatrixXd ,Eigen::MatrixXi> makeBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud, Eigen::Vector3d translation, Eigen::Matrix3d rotation);
+  std::pair<Eigen::MatrixXd, Eigen::MatrixXi> makeDensityBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud);
+  BEVResult makeDensityGlobalBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud);
   cv::Mat Eigen2Mat(Eigen::MatrixXi &matrix);
   double image_similarity_verify(int source_frame_id, int target_frame_id, const Eigen::Matrix3d &rot,const Eigen::Vector3d &t);
   cv::Mat image_transformer(cv::Mat &src, cv::Mat &transform_matrix);

@@ -63,6 +63,9 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   nh.param<int>("BEV_Y_MAX", config_setting.BEV_Y_MAX, 100);
   nh.param<double>("lidar_height", config_setting.lidar_height, 1.5);
   nh.param<double>("height_bin", config_setting.height_bin, 0.3);
+  nh.param<double>("Density_resolution", config_setting.Density_resolution, 0.5);
+  nh.param<double>("Density_threshold", config_setting.Density_threshold, 0.05);
+  nh.param<bool>("use_global_bev", config_setting.use_global_bev, true);
   // feature extraction
   nh.param<double>("image_quartity", config_setting.image_quartity, 0.15);
   nh.param<int>("Hamming_distance", config_setting.Hamming_distance, 10);
@@ -88,6 +91,9 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   std::cout << "BEV_Y_NUM: " << config_setting.BEV_Y_NUM << std::endl;
   std::cout << "BEV_X_MAX: " << config_setting.BEV_X_MAX << std::endl;
   std::cout << "BEV_Y_MAX: " << config_setting.BEV_Y_MAX << std::endl;
+  std::cout << "Density_resolution: " << config_setting.Density_resolution << std::endl;
+  std::cout << "Density_threshold: " << config_setting.Density_threshold << std::endl;
+  std::cout << "use_global_bev: " << config_setting.use_global_bev << std::endl;
   std::cout << "image_quartity: " << config_setting.image_quartity << std::endl;
   std::cout << "Hamming_distance: " << config_setting.Hamming_distance << std::endl;
   std::cout << "loop detection threshold: " << config_setting.image_threshold_ << std::endl;
@@ -372,41 +378,106 @@ void publish_std_pairs(
   pcl::PointCloud<pcl::PointXYZI>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZI>); 
   pcl::copyPointCloud(*input_cloud, *temp_cloud);
 
+  std::pair<Eigen::MatrixXd, Eigen::MatrixXi> result;
+  BEVResult bev_result;
+  cv::Mat BEV_Image_Pixel;
+
+  ///转为lidar系是为了使得方便使得点云在中间
   for (int i = 0; i < temp_cloud->size(); i++)
   {
-    pcl::PointXYZI point = temp_cloud->points[i];
-    point = vec2point(rotation.transpose() * (point2vec(point) - translation));
+      pcl::PointXYZI point = temp_cloud->points[i];
+      point = vec2point(rotation.transpose() * (point2vec(point) - translation));
 
-    temp_cloud->points[i] = point;
+      temp_cloud->points[i] = point;
   }
-  // Make BEV
-  auto result = makeBEV(temp_cloud, translation, rotation);
-
-  // BEV2Mat
-  cv::Mat BEV_Image_Pixel = Eigen2Mat(result.second);
+  if(!use_global_bev){
+      // Make BEV 按照有几个高度段有点为每个网格赋值
+//  auto result = makeBEV(temp_cloud, translation, rotation);
+      result = makeDensityBEV(temp_cloud);
+      // BEV2Mat
+      BEV_Image_Pixel = Eigen2Mat(result.second);
+  }
+  else{
+      bev_result = makeDensityGlobalBEV(temp_cloud);
+      BEV_Image_Pixel = Eigen2Mat(bev_result.density_matrix);
+  }
 
   BEV_Image_Pixel.convertTo(BEV_Image_Pixel, CV_8UC1);
-  cv::Mat BEV_Image_Pixel_copy = BEV_Image_Pixel.clone();
   cv::normalize(BEV_Image_Pixel, BEV_Image_Pixel, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+  cv::Mat BEV_Image_Pixel_copy = BEV_Image_Pixel.clone();
+  //转为彩色的
+  cv::cvtColor(BEV_Image_Pixel_copy, BEV_Image_Pixel_copy, cv::COLOR_GRAY2BGR);
 
   BEV_images.push_back(BEV_Image_Pixel);
 
-  std::vector<cv::Point2f> corners;
-  cv::goodFeaturesToTrack(BEV_Image_Pixel, corners, 100, image_quartity, Hamming_distance, cv::noArray(), 3, false, 0.04);
-  std::cout << "corners size: " << corners.size() << std::endl;
+//  std::vector<cv::Point2f> corners;
+//  cv::goodFeaturesToTrack(BEV_Image_Pixel, corners, 100, image_quartity, Hamming_distance, cv::noArray(), 3, false, 0.04);
+//  std::cout << "corners size: " << corners.size() << std::endl;
+  // FAST 特征点检测
+  std::vector<cv::KeyPoint> keypoints;
+  int fast_threshold = 30; // FAST 阈值
+  bool nonmaxSuppression = true; // 启用非极大值抑制
+  cv::FAST(BEV_Image_Pixel, keypoints, fast_threshold, nonmaxSuppression);
+  // 如果检测到的角点数量大于 50，保留响应值最大的前 50 个角点
+  if (keypoints.size() > 30) {
+      std::sort(keypoints.begin(), keypoints.end(),
+                [](const cv::KeyPoint &a, const cv::KeyPoint &b) {
+          return a.response > b.response; // 按响应值从大到小排序
+      });
+      keypoints.resize(30); // 截断到前 30 个
+  }
+  std::cout << "Filtered keypoints size: " << keypoints.size() << std::endl;
 
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr corner_points(
       new pcl::PointCloud<pcl::PointXYZINormal>);
-  for (const auto &corner : corners)
-  {
-    pcl::PointXYZINormal point;
-    point.x = (corner.x - BEV_X_NUM / 2) * (BEV_X_MAX * 2 / BEV_X_NUM);
-    point.y = (corner.y - BEV_Y_NUM / 2) * (BEV_Y_MAX * 2 / BEV_Y_NUM);
-    point.z = 0;
-    point.intensity = result.second(corner.y, corner.x); 
-    corner_points->push_back(point);
+
+  if(!use_global_bev){
+//      for (const auto &corner : corners)
+//      {
+//          pcl::PointXYZINormal point;
+//          point.x = (corner.x - BEV_X_NUM / 2) * (BEV_X_MAX * 2 / BEV_X_NUM);
+//          point.y = (corner.y - BEV_Y_NUM / 2) * (BEV_Y_MAX * 2 / BEV_Y_NUM);
+//          point.z = result.first(corner.x, corner.y);
+//          point.intensity = result.second(corner.y, corner.x);
+//          corner_points->push_back(point);
+//          ///增加用来可视化的
+//          cv::circle(BEV_Image_Pixel_copy, corner, 3, cv::Scalar(0, 0, 255), 2);
+//      }
+      for(const auto &keypoint : keypoints){
+          pcl::PointXYZINormal point;
+          float x = keypoint.pt.x;
+          float y = keypoint.pt.y;
+
+          // 按给定的公式计算点云的 x, y, z 坐标
+          point.x = (x - BEV_X_NUM / 2) * (BEV_X_MAX * 2 / BEV_X_NUM);
+          point.y = (y - BEV_Y_NUM / 2) * (BEV_Y_MAX * 2 / BEV_Y_NUM);
+          point.z = result.first(x, y); // 假设 `result.first` 是一个可以接收 float 参数的函数
+          point.intensity = result.second(y, x); // 假设 `result.second` 同理支持 float 参数
+          corner_points->push_back(point);
+
+          // 在可视化图像上绘制角点
+          cv::circle(BEV_Image_Pixel_copy, keypoint.pt, 3, cv::Scalar(0, 0, 255), 2);
+      }
   }
+  else{
+//      for(const auto &corner : corners){
+//          pcl::PointXYZINormal point;
+//          // 将 BEV 图像上的像素坐标恢复到实际坐标
+//          point.x = (corner.x + bev_result.lower_bound.x()) * Density_resolution + Density_resolution / 2.0;
+//          point.y = (corner.y + bev_result.lower_bound.y()) * Density_resolution + Density_resolution / 2.0;
+//          point.z = bev_result.avg_z_matrix(corner.x, corner.y);
+//          point.intensity = bev_result.density_matrix(corner.y, corner.x);
+//          corner_points->push_back(point);
+//          ///增加用来可视化的
+//          cv::circle(BEV_Image_Pixel_copy, corner, 3, cv::Scalar(0, 0, 255), 2);
+//      }
+  }
+
   corner_cloud_vec_.push_back(corner_points);
+  ///增加用来可视化
+//  std::cout << "Current working directory: " << std::filesystem::current_path() << std::endl;
+  std::string bev_with_corners_filename = "/home/tkw/IFTD/src/img_density/"+ std::to_string(num) + "_corners.png";
+  cv::imwrite(bev_with_corners_filename, BEV_Image_Pixel_copy);
   // std::cout << "[Description] corners size:" << corner_points->size()
             // << std::endl;
 
@@ -464,6 +535,133 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXi> IFTDescManager::makeBEV(pcl::PointCl
 
   return std::make_pair(BEV_IMAGE_density, BEV_IMAGE_Pixel);
 }
+
+std::pair<Eigen::MatrixXd, Eigen::MatrixXi> IFTDescManager::makeDensityBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud){
+    Eigen::MatrixXi BEV_IMAGE_density = Eigen::MatrixXi::Zero(BEV_X_NUM, BEV_Y_NUM);
+    Eigen::MatrixXd BEV_IMAGE_avg_z = Eigen::MatrixXd::Zero(BEV_X_NUM, BEV_Y_NUM);
+    Eigen::MatrixXd BEV_IMAGE_z_sum = Eigen::MatrixXd::Zero(BEV_X_NUM, BEV_Y_NUM);
+    double BEV_X_GAP = BEV_X_MAX * 2 / BEV_X_NUM;
+    double BEV_Y_GAP = BEV_Y_MAX * 2 / BEV_Y_NUM;
+
+    for (int pt_idx = 0; pt_idx < input_cloud->size(); pt_idx++)
+    {
+        Eigen::Vector3d point_ori(input_cloud->points[pt_idx].x, input_cloud->points[pt_idx].y, input_cloud->points[pt_idx].z);
+
+        int idx = point_ori.x() / BEV_X_GAP + BEV_X_NUM / 2;
+        int idy = point_ori.y() / BEV_Y_GAP + BEV_Y_NUM / 2;
+
+        if (idx < 0 || idx >= BEV_X_NUM || idy < 0 || idy >= BEV_Y_NUM)
+            continue;
+        BEV_IMAGE_density(idx, idy)++;
+
+        BEV_IMAGE_z_sum(idx, idy) += point_ori.z();
+    }
+
+    // 找到点数最小值和最大值
+    int min_density = std::numeric_limits<int>::max();
+    int max_density = std::numeric_limits<int>::min();
+
+    for (int i = 0; i < BEV_X_NUM; i++)
+    {
+        for (int j = 0; j < BEV_Y_NUM; j++)
+        {
+            if (BEV_IMAGE_density(i, j) > 0)
+            {
+                min_density = std::min(min_density, BEV_IMAGE_density(i, j));
+                max_density = std::max(max_density, BEV_IMAGE_density(i, j));
+            }
+        }
+    }
+
+    for (int i = 0; i < BEV_X_NUM; i++)
+    {
+        for (int j = 0; j < BEV_Y_NUM; j++)
+        {
+            if (BEV_IMAGE_density(i, j) > 0)
+            {
+                if(BEV_IMAGE_density(i, j) < 0.05 * (max_density - min_density)){
+                    BEV_IMAGE_density(i, j) = 0;
+                    BEV_IMAGE_avg_z(i, j) = 0;
+                }
+                else{
+                    BEV_IMAGE_avg_z(i, j) = BEV_IMAGE_z_sum(i, j) / BEV_IMAGE_density(i, j);
+                }
+            }
+            else
+            {
+                BEV_IMAGE_avg_z(i, j) = 0; // 如果栅格没有点，平均 z 设为 0
+            }
+        }
+    }
+
+    return std::make_pair(BEV_IMAGE_avg_z, BEV_IMAGE_density);
+}
+
+BEVResult IFTDescManager::makeDensityGlobalBEV(
+        pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud)
+{
+
+    struct GridData{
+        int count = 0;
+        double z_sum = 0.0;
+    };
+    std::map<Eigen::Array2i, GridData, ComparePixels> grid_data;
+    double max_points = std::numeric_limits<double>::min();
+    double min_points = std::numeric_limits<double>::max();
+    Eigen::Array2i lower_bound_coordinates = Eigen::Array2i::Constant(std::numeric_limits<int>::max());
+    Eigen::Array2i upper_bound_coordinates = Eigen::Array2i::Constant(std::numeric_limits<int>::min());
+    double resolution = Density_resolution;
+
+    // 离散化函数
+    auto discretize = [resolution](const Eigen::Vector3d &point) -> Eigen::Array2i {
+        return (point.head<2>() / resolution).array().floor().cast<int>();
+    };
+
+    // 遍历点云
+    for (const auto &point : input_cloud->points)
+    {
+        Eigen::Vector3d point_vec(point.x, point.y, point.z);
+        const auto pixel = discretize(point_vec);
+
+        // 统计点数
+        auto &data = grid_data[pixel];
+        data.count++;
+        data.z_sum += point.z;
+
+        // 更新边界
+        lower_bound_coordinates = lower_bound_coordinates.min(pixel);
+        upper_bound_coordinates = upper_bound_coordinates.max(pixel);
+    }
+
+    // 计算矩阵大小
+    const auto rows_and_columns = upper_bound_coordinates - lower_bound_coordinates + Eigen::Array2i::Constant(1);
+    const int n_rows = rows_and_columns.x();
+    const int n_cols = rows_and_columns.y();
+
+    // 初始化结果矩阵
+    Eigen::MatrixXi BEV_IMAGE_density = Eigen::MatrixXi::Zero(n_rows, n_cols);
+    Eigen::MatrixXd BEV_IMAGE_avg_z = Eigen::MatrixXd::Zero(n_rows, n_cols);
+
+    // 填充结果矩阵
+    for (const auto &[pixel, data] : grid_data)
+    {
+        const auto pixel_idx = pixel - lower_bound_coordinates;
+
+        // 填充密度
+        BEV_IMAGE_density(pixel_idx.x(), pixel_idx.y()) = data.count;
+        BEV_IMAGE_avg_z(pixel_idx.x(), pixel_idx.y()) = data.z_sum / data.count;
+    }
+
+    // 返回密度和平均 z 值矩阵
+    return BEVResult{
+        .avg_z_matrix = BEV_IMAGE_avg_z,
+        .density_matrix = BEV_IMAGE_density,
+        .lower_bound = lower_bound_coordinates,
+        .upper_bound = upper_bound_coordinates,
+    };
+
+}
+
 
 void IFTDescManager::SearchLoop(
     const std::vector<IFTDesc> &stds_vec, std::pair<int, double> &loop_result,
@@ -690,6 +888,7 @@ void IFTDescManager::build_IFTDesc(
           l1 << 1, 2, 0;
           l2 << 1, 0, 3;
           l3 << 0, 2, 3;
+          ///这样后排序为c>b>a
           if (a > b) {
             temp = a;
             a = b;

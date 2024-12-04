@@ -24,6 +24,40 @@ std::vector<float> read_lidar_data(const std::string lidar_data_path) {
   return lidar_data_buffer;
 }
 
+// 从 TUM 格式的文件中读取帧号和位置信息
+std::map<int, Eigen::Vector3d> readTUMPoses(const std::string& file_path) {
+    std::map<int, Eigen::Vector3d> frame_to_position;
+    std::ifstream file(file_path);
+
+    if (!file.is_open()) {
+        std::cerr << "无法打开文件: " << file_path << std::endl;
+        return frame_to_position;
+    }
+
+    std::string line;
+    int frame_index = 0;
+
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;  // 跳过空行和注释行
+
+        std::istringstream iss(line);
+        double timestamp, tx, ty, tz, qx, qy, qz, qw;
+
+        // 读取 TUM 格式的一行数据
+        if (!(iss >> timestamp >> tx >> ty >> tz >> qx >> qy >> qz >> qw)) {
+            std::cerr << "文件格式错误: " << line << std::endl;
+            continue;
+        }
+
+        // 保存位置信息到 map 中，以帧号为键
+        frame_to_position[frame_index] = Eigen::Vector3d (tx, ty, tz);
+        frame_index++;  // 递增帧号
+    }
+
+    file.close();
+    return frame_to_position;
+}
+
 int main(int argc, char **argv) {
   ros::init(argc, argv, "demo_kitti");
   ros::NodeHandle nh;
@@ -34,9 +68,13 @@ int main(int argc, char **argv) {
   nh.param<std::string>("lidar_path", lidar_path, "");
   nh.param<std::string>("pose_path", pose_path, "");
   nh.param<std::string>("output_path", output_path, "");
+  int TP = 0;
+  int FP = 0;
+  int FN = 0;
 
   ConfigSetting config_setting;
   read_parameters(nh, config_setting);
+  std::map<int, Eigen::Vector3d> frame_to_pose = readTUMPoses(pose_path);
   sleep(3);
   ros::Publisher pubOdomAftMapped =
       nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 10);
@@ -111,7 +149,7 @@ int main(int argc, char **argv) {
       std::cout << "Key Frame id:" << keyCloudInd
                 << ", cloud size: " << temp_cloud->size() << std::endl;
 
-      // step1. Descriptor Extraction
+      /// step1. Descriptor Extraction
       std::cout << "Descriptor Extraction..." << std::endl;
       auto t_descriptor_begin = std::chrono::high_resolution_clock::now();
       std::vector<IFTDesc> stds_vec;
@@ -120,7 +158,7 @@ int main(int argc, char **argv) {
       auto t_descriptor_end = std::chrono::high_resolution_clock::now();
       descriptor_time.push_back(time_inc(t_descriptor_end, t_descriptor_begin));
 
-      // step2. Searching Loop
+      /// step2. Searching Loop
       std::cout << "Searching Loop..." << std::endl;
       auto t_query_begin = std::chrono::high_resolution_clock::now();
       std::pair<int, double> search_result(-1, 0);
@@ -136,6 +174,15 @@ int main(int argc, char **argv) {
         std::cout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
                   << search_result.first << ", score:" << search_result.second
                   << std::endl;
+        int source = config_setting.sub_frame_num_ * (static_cast<int>(keyCloudInd) + 1);
+        int target = config_setting.sub_frame_num_ * (search_result.first + 1);
+        std::cout << "loop id:"<< source <<"-"<< target<<std::endl;
+        if((frame_to_pose[source] - frame_to_pose[target]).norm()<=15){
+            TP++;
+        }
+        else{
+            FP++;
+        }
       }
 
       double cloudIndDouble = static_cast<double>(cloudInd);
@@ -146,7 +193,7 @@ int main(int argc, char **argv) {
       auto t_query_end = std::chrono::high_resolution_clock::now();
       querying_time.push_back(time_inc(t_query_end, t_query_begin));
 
-      // step3. Add descriptors to the database
+      /// step3. Add descriptors to the database
       std::cout << "Add descriptors to the database..." << std::endl;
       auto t_map_update_begin = std::chrono::high_resolution_clock::now();
       std_manager->AddIFTDescs(stds_vec);
@@ -226,5 +273,7 @@ int main(int argc, char **argv) {
             << "ms, update: " << mean_update_time << "ms, total: "
             << mean_descriptor_time + mean_query_time + mean_update_time << "ms"
             << std::endl;
+  std::cout << "TP: "<< TP<<", FP："<< FP<<std::endl;
+  std::cout << "P: "<< TP * 1.0/(TP + FP);
   return 0;
 }

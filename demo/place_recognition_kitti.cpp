@@ -58,6 +58,7 @@ std::map<int, Eigen::Vector3d> readTUMPoses(const std::string& file_path) {
     return frame_to_position;
 }
 
+
 int main(int argc, char **argv) {
   ros::init(argc, argv, "demo_kitti");
   ros::NodeHandle nh;
@@ -177,12 +178,53 @@ int main(int argc, char **argv) {
         int source = config_setting.sub_frame_num_ * (static_cast<int>(keyCloudInd) + 1);
         int target = config_setting.sub_frame_num_ * (search_result.first + 1);
         std::cout << "loop id:"<< source <<"-"<< target<<std::endl;
-        if((frame_to_pose[source] - frame_to_pose[target]).norm()<=15){
+        double loop_distance = (frame_to_pose[source] - frame_to_pose[target]).norm();
+        if(loop_distance <= 15){
             TP++;
         }
         else{
             FP++;
         }
+        ///add
+        int max_count = 0;
+        double mean_density1 = 0, mean_density2 = 0;
+        double mean_attach1 = 0, mean_attach2 = 0;
+        for (auto pair : loop_std_pair){
+            if(max_count >= 20) break;
+            max_count ++;
+            mean_attach1 += pair.first.vertex_attached_.norm();
+            mean_attach2 += pair.second.vertex_attached_.norm();
+            mean_density1 += (pair.first.density_mean.x() + pair.first.density_mean.y() + pair.first.density_mean.z());
+            mean_density2 += (pair.second.density_mean.x() + pair.second.density_mean.y() + pair.second.density_mean.z());
+        }
+        if(max_count==0){
+            mean_attach1 = -1;
+            mean_attach2 = -1;
+            mean_density1 = -1;
+            mean_density2 = -1;
+        }
+        else{
+            mean_attach1 = mean_attach1/max_count;
+            mean_attach2 = mean_attach1/max_count;
+            mean_density1 = mean_density1/max_count;
+            mean_density2 = mean_density2/max_count;
+        }
+        ///add for wass
+        double wass1 = 0, wass2 = 0, wass3 = 0;
+        for(auto pair : loop_std_pair){
+            wass1 += computeWassersteinDistance(pair.first.density_A, pair.second.density_A);
+            wass2 += computeWassersteinDistance(pair.first.density_B, pair.second.density_B);
+            wass3 += computeWassersteinDistance(pair.first.density_C, pair.second.density_C);
+            break;
+        }
+
+        std::ofstream out_density(std::string(output_path + "/density.txt"), std::ios::app);
+        out_density << static_cast<double>(cloudInd) << " "<< keyCloudInd <<
+        ", size: "<< loop_std_pair.size() <<", density: "<< mean_density1 <<
+        ", "<<mean_density2<<", attach:"<< mean_attach1 << ", "<< mean_attach2
+        <<"wass: "<< wass1 <<", "<< wass2 <<", "<< wass3
+        <<", distance: "<< loop_distance << std::endl;
+        out_density.close();
       }
 
       double cloudIndDouble = static_cast<double>(cloudInd);

@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <cmath>
 //
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
@@ -47,6 +48,17 @@ struct BEVResult {
     Eigen::Array2i upper_bound;          // 上边界
 };
 
+struct CornerDescriptor {
+    pcl::PointXYZINormal point;   // 点的位置信息
+    std::array<int, 9> neighborhood_density; // 周围9个格子的密度信息
+    Eigen::Vector2i position;
+    double mean_z;
+    double var_z;
+
+    // 构造函数，便于初始化
+    CornerDescriptor(const pcl::PointXYZINormal& pt, const std::array<int, 9>& density, const Eigen::Vector2i& pos, const double& mean, const double& var)
+            : point(pt), neighborhood_density(density), position(pos), mean_z(mean), var_z(var) {}
+};
 
 typedef struct ConfigSetting {
   /* for point cloud pre-preocess*/
@@ -81,6 +93,7 @@ typedef struct ConfigSetting {
   int image_reseize_ = 20;
   double distance_threshold_ = 15;
   double image_threshold_ = 0.2;
+  double density_diff_threshold = 0.1;
 
 } ConfigSetting;
 
@@ -102,6 +115,16 @@ typedef struct IFTDesc {
 
   // some other inform attached to each vertex,e.g., intensity
   Eigen::Vector3d vertex_attached_;
+
+  //my add
+  std::array<int, 9> density_A;
+  std::array<int, 9> density_B;
+  std::array<int, 9> density_C;
+  Eigen::Vector3d density_mean;
+  double density_center;
+  Eigen::Vector2d mean_var_A;
+  Eigen::Vector2d mean_var_B;
+  Eigen::Vector2d mean_var_C;
 } IFTDesc;
 
 // plane structure for corner point extraction
@@ -193,6 +216,14 @@ template <> struct std::hash<IFTDesc_LOC> {
 void down_sampling_voxel(pcl::PointCloud<pcl::PointXYZI> &pl_feat,
                          double voxel_size);
 
+double pearsonCorrelation(const std::array<int, 9>& x, const std::array<int, 9>& y);
+
+double cosineSimilarity(const Eigen::Vector3d& v1, const Eigen::Vector3d& v2);
+
+std::pair<double, double> computeGaussianParams(const std::array<int, 9>& array);
+
+double computeWassersteinDistance(const std::array<int, 9>& array1, const std::array<int, 9>& array2);
+
 void load_pose_with_time(
     const std::string &pose_file,
     std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> &poses_vec,
@@ -250,6 +281,7 @@ public:
 
     image_quartity = config_setting.image_quartity;
     Hamming_distance = config_setting.Hamming_distance;
+    density_diff_threshold = config_setting.density_diff_threshold;
   };
 
   int time_unit;
@@ -264,6 +296,9 @@ public:
   bool use_global_bev;
   double image_quartity;
   int Hamming_distance;
+  double density_diff_threshold;
+
+  Eigen::MatrixXi matrix_density;
 
   std::vector<std::pair <double, double>> centors;
   std::vector<cv::Mat> BEV_images;
@@ -305,7 +340,7 @@ public:
 private:
   // build IFTDescs from corner points.
   void
-  build_IFTDesc(const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &corner_points,
+  build_IFTDesc(const std::vector<CornerDescriptor> &corner_data,
                std::vector<IFTDesc> &stds_vec);
 
   // Select a specified number of candidate frames according to the number of
@@ -324,7 +359,9 @@ private:
                        Eigen::Matrix3d &rot);
   //
   std::pair<Eigen::MatrixXd ,Eigen::MatrixXi> makeBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud, Eigen::Vector3d translation, Eigen::Matrix3d rotation);
-  std::pair<Eigen::MatrixXd, Eigen::MatrixXi> makeDensityBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud);
+  std::pair<Eigen::MatrixXd, Eigen::MatrixXi> makeDensityBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud,
+                                                             std::vector<std::vector<std::vector<Eigen::Vector3d>>> &BEV_point_map,
+                                                             double &min_z);
   BEVResult makeDensityGlobalBEV(pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud);
   cv::Mat Eigen2Mat(Eigen::MatrixXi &matrix);
   double image_similarity_verify(int source_frame_id, int target_frame_id, const Eigen::Matrix3d &rot,const Eigen::Vector3d &t);

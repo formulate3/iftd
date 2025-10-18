@@ -45,6 +45,31 @@ double pearsonCorrelation(const std::array<int, 9>& x, const std::array<int, 9>&
     }
 }
 
+// 计算皮尔逊相关系数的函数
+double computePearsonCorrelation(const Eigen::Vector3d& v1, const Eigen::Vector3d& v2) {
+    // 计算均值
+    double mean_v1 = v1.mean();
+    double mean_v2 = v2.mean();
+
+    // 计算分子和分母
+    double numerator = 0.0;
+    double denominator_v1 = 0.0;
+    double denominator_v2 = 0.0;
+
+    for (int i = 0; i < 3; ++i) {
+        double diff_v1 = v1(i) - mean_v1;
+        double diff_v2 = v2(i) - mean_v2;
+        numerator += diff_v1 * diff_v2;
+        denominator_v1 += diff_v1 * diff_v1;
+        denominator_v2 += diff_v2 * diff_v2;
+    }
+
+    double denominator = std::sqrt(denominator_v1 * denominator_v2);
+
+    // 计算皮尔逊相关系数
+    return numerator / denominator;
+}
+
 double cosineSimilarity(const Eigen::Vector3d& v1, const Eigen::Vector3d& v2) {
     // Compute the norms of the vectors
     double norm_v1 = v1.norm();
@@ -551,6 +576,7 @@ void publish_std_pairs(
           }
           z_variance /= filtered_z.size();
       }
+
       double entropy = (1/2.0) * (1 + std::log(2 * M_PI)) + 0.5 * std::log(z_variance);
       double score = 0;
       if(filtered_z.size() > 0){
@@ -558,25 +584,27 @@ void publish_std_pairs(
               double gaussian_value = -0.5 * (z - z_mean) * (z - z_mean) / z_variance;
               score += std::exp(gaussian_value);
           }
+          ///不一定需要这个
+//          score = score / filtered_z.size();
       }
 
-      //下面是要存储周围3*3方格内的密度
-      const int dy[] = {-1, -1, 0, 1, 1, 1, 0, -1}; // 左, 左上, 上, 右上, 右, 右下, 下, 左下
-      const int dx[] = {0, -1, -1, -1, 0, 1, 1, 1};
-      int density_count = result.second(x, y);
-      for (int i = 0; i < 8; ++i) {
-          int nx = x + dx[i];
-          int ny = y + dy[i];
-          //rows和cols可能反了
-          if (nx >= 0 && nx < result.second.rows() && ny >= 0 && ny < result.second.cols()) {
-              neighborhood[i] = result.second(nx, ny); // 使用 `result.second` 填充密度值
-              density_count += neighborhood[i];
-          } else {
-              neighborhood[i] = 0.0; // 边界外填充为 0
-          }
-      }
-      ///第9个元素存储中心值
-      neighborhood[8] = result.second(x, y);
+      // //下面是要存储周围3*3方格内的密度
+      // const int dy[] = {-1, -1, 0, 1, 1, 1, 0, -1}; // 左, 左上, 上, 右上, 右, 右下, 下, 左下
+      // const int dx[] = {0, -1, -1, -1, 0, 1, 1, 1};
+      // int density_count = result.second(x, y);
+      // for (int i = 0; i < 8; ++i) {
+      //     int nx = x + dx[i];
+      //     int ny = y + dy[i];
+      //     //rows和cols可能反了
+      //     if (nx >= 0 && nx < result.second.rows() && ny >= 0 && ny < result.second.cols()) {
+      //         neighborhood[i] = result.second(nx, ny); // 使用 `result.second` 填充密度值
+      //         density_count += neighborhood[i];
+      //     } else {
+      //         neighborhood[i] = 0.0; // 边界外填充为 0
+      //     }
+      // }
+      // ///第9个元素存储中心值
+      // neighborhood[8] = result.second(x, y);
 
       corner_points->push_back(point);
       Eigen::Vector2i pos(x, y);
@@ -591,7 +619,7 @@ void publish_std_pairs(
 
   corner_cloud_vec_.push_back(corner_points);
   ///增加用来可视化
-//  std::string bev_with_corners_filename = "/home/tkw/IFTD/src/iftd/img_density/"+ std::to_string(num) + "_corners.png";
+//  std::string bev_with_corners_filename = "/home/tkw/IFTD/src/iftd/img/"+ std::to_string(num) + "_corners.png";
 //  cv::imwrite(bev_with_corners_filename, BEV_Image_Pixel_copy);
 
   // std::cout << "[Description] corners size:" << corner_points->size()
@@ -863,6 +891,7 @@ void IFTDescManager::SearchLoop(
     loop_pairs.push_back(loop_pair);
     relative_poses.push_back(best_transform);
 
+
     return;
   }
   
@@ -904,7 +933,8 @@ void IFTDescManager::SearchLoop(
     double verify_score = image_similarity_verify(current_frame_id_, history_frame_id, relative_rot, relative_t);
 
     // if (verify_score > config_setting_.image_threshold_)
-    if (verify_score > config_setting_.image_threshold_ && relative_t.norm() < config_setting_.distance_threshold_) //distance threshold
+//    if (verify_score > config_setting_.image_threshold_ && relative_t.norm() < config_setting_.distance_threshold_) //distance threshold
+    if (relative_t.norm() < config_setting_.distance_threshold_)
     {
       loop_result = std::pair<int, double>(history_frame_id, verify_score);
       loop_transform = std::pair<Eigen::Vector3d, Eigen::Matrix3d>(relative_t, relative_rot);
@@ -1288,24 +1318,33 @@ void IFTDescManager::candidate_selector(
 //                          (mean_z_now - mean_z_old).norm()
 //                          /(mean_z_now + mean_z_old).norm();
                   //3.2 score的余弦相似度
-                  Eigen::Vector3d mean_z_now(src_std.mean_var_A.x(), src_std.mean_var_B.x(), src_std.mean_var_C.x());
-                  Eigen::Vector3d mean_z_old(data_base_[position][j].mean_var_A.x(), data_base_[position][j].mean_var_B.x(), data_base_[position][j].mean_var_C.x());
-                  double vertex_attach_diff = cosineSimilarity(mean_z_now, mean_z_old);
+//                  Eigen::Vector3d mean_z_now(src_std.mean_var_A.x(), src_std.mean_var_B.x(), src_std.mean_var_C.x());
+//                  Eigen::Vector3d mean_z_old(data_base_[position][j].mean_var_A.x(), data_base_[position][j].mean_var_B.x(), data_base_[position][j].mean_var_C.x());
+//                  double vertex_attach_diff = cosineSimilarity(mean_z_now, mean_z_old);
 
-//                  double vertex_attach_diff =
-//                          2.0 *
-//                          abs(src_std.density_center -
-//                           data_base_[position][j].density_center)/
-//                          (src_std.density_center +
-//                           data_base_[position][j].density_center);
-//                  double vertex_attach_diff =
-//                          2.0 *
-//                          (src_std.density_mean -
-//                           data_base_[position][j].density_mean)
-//                                  .norm() /
-//                          (src_std.density_mean +
-//                           data_base_[position][j].density_mean)
-//                                  .norm();
+                  //4 联合score和熵的余弦相似度
+//                  Eigen::Vector3d mean_now(src_std.mean_var_A.x(), src_std.mean_var_B.x(), src_std.mean_var_C.x());
+//                  Eigen::Vector3d mean_old(data_base_[position][j].mean_var_A.x(), data_base_[position][j].mean_var_B.x(), data_base_[position][j].mean_var_C.x());
+//                  Eigen::Vector3d var_now(src_std.mean_var_A.y(), src_std.mean_var_B.y(), src_std.mean_var_C.y());
+//                  Eigen::Vector3d var_old(data_base_[position][j].mean_var_A.y(), data_base_[position][j].mean_var_B.y(), data_base_[position][j].mean_var_C.y());
+//                  double vertex_attach_diff = 1.0 * cosineSimilarity(mean_now, mean_old) + 0.0 * cosineSimilarity(var_now, var_old);
+
+                  //5 联合密度和熵的余弦相似度
+                  Eigen::Vector3d mean_now(src_std.vertex_attached_.x(), src_std.vertex_attached_.y(), src_std.vertex_attached_.z());
+                  Eigen::Vector3d mean_old(data_base_[position][j].vertex_attached_.x(), data_base_[position][j].vertex_attached_.y(), data_base_[position][j].vertex_attached_.z());
+                  Eigen::Vector3d var_now(src_std.mean_var_A.y(), src_std.mean_var_B.y(), src_std.mean_var_C.y());
+                  Eigen::Vector3d var_old(data_base_[position][j].mean_var_A.y(), data_base_[position][j].mean_var_B.y(), data_base_[position][j].mean_var_C.y());
+                  // double vertex_attach_diff = 0.3 * cosineSimilarity(mean_now, mean_old) + 0.7 * cosineSimilarity(var_now, var_old);
+                  //改为全是熵的判断依据
+                  double vertex_attach_diff = cosineSimilarity(var_now, var_old);
+
+                  //6 联合密度和熵的相关系数
+//                  Eigen::Vector3d mean_now(src_std.vertex_attached_.x(), src_std.vertex_attached_.y(), src_std.vertex_attached_.z());
+//                  Eigen::Vector3d mean_old(data_base_[position][j].vertex_attached_.x(), data_base_[position][j].vertex_attached_.y(), data_base_[position][j].vertex_attached_.z());
+//                  Eigen::Vector3d var_now(src_std.mean_var_A.y(), src_std.mean_var_B.y(), src_std.mean_var_C.y());
+//                  Eigen::Vector3d var_old(data_base_[position][j].mean_var_A.y(), data_base_[position][j].mean_var_B.y(), data_base_[position][j].mean_var_C.y());
+//                  double vertex_attach_diff = 0.3 * computePearsonCorrelation(mean_now, mean_old) + 0.7 * computePearsonCorrelation(var_now, var_old);
+
 
                   if (vertex_attach_diff >
                       config_setting_.vertex_diff_threshold_) {
@@ -1315,29 +1354,6 @@ void IFTDescManager::candidate_selector(
                       useful_match_position[i].push_back(position);
                       useful_match_index[i].push_back(j);
                   }
-
-//                if(src_std.density_mean.norm() < 2 || data_base_[position][j].density_mean.norm() < 2){
-//
-//                }
-//                else{
-//                    double density_attach_diff =
-//                            2.0 *
-//                            (src_std.density_mean -
-//                             data_base_[position][j].density_mean)
-//                                    .norm() /
-//                            (src_std.density_mean +
-//                             data_base_[position][j].density_mean)
-//                                    .norm();
-//
-//                    if (density_attach_diff <
-//                        config_setting_.density_diff_threshold) {
-//
-//                        final_match_cnt++;
-//                        useful_match[i] = true;
-//                        useful_match_position[i].push_back(position);
-//                        useful_match_index[i].push_back(j);
-//                    }
-//                }
               }
             }
           }
@@ -1473,7 +1489,7 @@ void IFTDescManager::candidate_verify(
     Eigen::Vector3d best_t;
     triangle_solver(best_pair, best_t, best_rot);  
 
-    if(best_t.norm() > config_setting_.distance_threshold_){  
+    if(best_t.norm() > config_setting_.distance_threshold_){
       verify_score = -1;
       return;
     }
@@ -1481,6 +1497,7 @@ void IFTDescManager::candidate_verify(
     relative_pose.first = best_t;
     relative_pose.second = best_rot;
     int num_success = 0;
+    double new_score = 0;
     for (size_t j = 0; j < candidate_matcher.match_list_.size(); j++) { 
       auto verify_pair = candidate_matcher.match_list_[j];
       Eigen::Vector3d A = verify_pair.first.vertex_A_;
@@ -1492,13 +1509,17 @@ void IFTDescManager::candidate_verify(
       double dis_A = (A_transform - verify_pair.second.vertex_A_).norm();
       double dis_B = (B_transform - verify_pair.second.vertex_B_).norm();
       double dis_C = (C_transform - verify_pair.second.vertex_C_).norm();
+      new_score += (dis_A + dis_B + dis_C)/3;
       if (dis_A < dis_threshold && dis_B < dis_threshold && dis_C < dis_threshold)
       {
         sucess_match_vec.push_back(verify_pair);
         num_success += 1;
       }
     }
+    new_score = new_score/candidate_matcher.match_list_.size();
+    new_score = 1/new_score;
 
+//    verify_score = new_score;
 //    verify_score = num_success/(1.0 * candidate_matcher.match_list_.size());
     verify_score = image_similarity_verify(candidate_matcher.match_id_.first, candidate_matcher.match_id_.second,best_rot, best_t);
   } 
@@ -1599,3 +1620,88 @@ void IFTDescManager::triangle_solver(std::pair<IFTDesc, IFTDesc> &std_pair,
   }
   t = -rot * std_pair.first.center_ + std_pair.second.center_;
 }
+
+// void IFTDescManager::PlaneGeomrtricIcp(
+//     const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &source_cloud,
+//     const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &target_cloud,
+//     std::pair<Eigen::Vector3d, Eigen::Matrix3d> &transform) {
+//   pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr kd_tree(
+//       new pcl::KdTreeFLANN<pcl::PointXYZ>);
+//   pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud(
+//       new pcl::PointCloud<pcl::PointXYZ>);
+//   for (size_t i = 0; i < target_cloud->size(); i++) {
+//     pcl::PointXYZ pi;
+//     pi.x = target_cloud->points[i].x;
+//     pi.y = target_cloud->points[i].y;
+//     pi.z = target_cloud->points[i].z;
+//     input_cloud->push_back(pi);
+//   }
+//   kd_tree->setInputCloud(input_cloud);
+//   ceres::Manifold *quaternion_manifold = new ceres::EigenQuaternionManifold;
+//   ceres::Problem problem;
+//   ceres::LossFunction *loss_function = nullptr;
+//   Eigen::Matrix3d rot = transform.second;
+//   Eigen::Quaterniond q(rot);
+//   Eigen::Vector3d t = transform.first;
+//   double para_q[4] = {q.x(), q.y(), q.z(), q.w()};
+//   double para_t[3] = {t(0), t(1), t(2)};
+//   problem.AddParameterBlock(para_q, 4, quaternion_manifold);
+//   problem.AddParameterBlock(para_t, 3);
+//   Eigen::Map<Eigen::Quaterniond> q_last_curr(para_q);
+//   Eigen::Map<Eigen::Vector3d> t_last_curr(para_t);
+//   std::vector<int> pointIdxNKNSearch(1);
+//   std::vector<float> pointNKNSquaredDistance(1);
+//   int useful_match = 0;
+//   for (size_t i = 0; i < source_cloud->size(); i++) {
+//     pcl::PointXYZINormal searchPoint = source_cloud->points[i];
+//     Eigen::Vector3d pi(searchPoint.x, searchPoint.y, searchPoint.z);
+//     pi = rot * pi + t;
+//     pcl::PointXYZ use_search_point;
+//     use_search_point.x = pi[0];
+//     use_search_point.y = pi[1];
+//     use_search_point.z = pi[2];
+//     Eigen::Vector3d ni(searchPoint.normal_x, searchPoint.normal_y,
+//                        searchPoint.normal_z);
+//     ni = rot * ni;
+//     if (kd_tree->nearestKSearch(use_search_point, 1, pointIdxNKNSearch,
+//                                 pointNKNSquaredDistance) > 0) {
+//       pcl::PointXYZINormal nearstPoint =
+//           target_cloud->points[pointIdxNKNSearch[0]];
+//       Eigen::Vector3d tpi(nearstPoint.x, nearstPoint.y, nearstPoint.z);
+//       Eigen::Vector3d tni(nearstPoint.normal_x, nearstPoint.normal_y,
+//                           nearstPoint.normal_z);
+//       Eigen::Vector3d normal_inc = ni - tni;
+//       Eigen::Vector3d normal_add = ni + tni;
+//       double point_to_point_dis = (pi - tpi).norm();
+//       double point_to_plane = fabs(tni.transpose() * (pi - tpi));
+//       if ((normal_inc.norm() < config_setting_.normal_threshold_ ||
+//            normal_add.norm() < config_setting_.normal_threshold_) &&
+//           point_to_plane < config_setting_.dis_threshold_ &&
+//           point_to_point_dis < 3) {
+//         useful_match++;
+//         ceres::CostFunction *cost_function;
+//         Eigen::Vector3d curr_point(source_cloud->points[i].x,
+//                                    source_cloud->points[i].y,
+//                                    source_cloud->points[i].z);
+//         Eigen::Vector3d curr_normal(source_cloud->points[i].normal_x,
+//                                     source_cloud->points[i].normal_y,
+//                                     source_cloud->points[i].normal_z);
+
+//         cost_function = PlaneSolver::Create(curr_point, curr_normal, tpi, tni);
+//         problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
+//       }
+//     }
+//   }
+//   ceres::Solver::Options options;
+//   options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+//   options.max_num_iterations = 100;
+//   options.minimizer_progress_to_stdout = false;
+//   ceres::Solver::Summary summary;
+//   ceres::Solve(options, &problem, &summary);
+//   Eigen::Quaterniond q_opt(para_q[3], para_q[0], para_q[1], para_q[2]);
+//   rot = q_opt.toRotationMatrix();
+//   t << t_last_curr(0), t_last_curr(1), t_last_curr(2);
+//   transform.first = t;
+//   transform.second = rot;
+//   // std::cout << "useful match for icp:" << useful_match << std::endl;
+// }

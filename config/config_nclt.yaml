@@ -2,7 +2,7 @@
 ds_size: 0.25
 
 #bin timestamp
-bin_timestamp: 1  # 1 for s, 2 for ms, 3 for us, 4 for ns 
+bin_timestamp: 3  # 1 for s, 2 for ms, 3 for us, 4 for ns 
 
 # Bev Image
 BEV_X_NUM: 300
@@ -26,9 +26,10 @@ std_side_resolution: 0.2
 skip_near_num: 50
 candidate_num: 50
 sub_frame_num: 10
-vertex_diff_threshold: 0.4
+vertex_diff_threshold: 0.9
 rough_dis_threshold: 0.01
 image_reseize: 20
 distance_threshold: 15
-image_threshold: 0.2
+image_threshold: 0
+density_diff_threshold: 0.2
 

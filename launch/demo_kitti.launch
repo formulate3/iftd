@@ -11,8 +11,8 @@
 		output="screen" 
 	/>
 
-  <param name="lidar_path" type="string" value = "/media/tkw/新加卷/data/KITTI/data_odometry_velodyne/dataset/sequences/00/velodyne/"/>
-  <param name="pose_path" type="string" value = "/home/tkw/STD_data/example1/OneDrive_1_2024-10-12/kitti00.txt"/>
+  <param name="lidar_path" type="string" value = "/media/tkw/新加卷/data/KITTI/data_odometry_velodyne/dataset/sequences/08/velodyne/"/>
+  <param name="pose_path" type="string" value = "/home/tkw/STD_data/example1/OneDrive_1_2024-10-12/kitti08.txt"/>
   <param name="output_path" type="string" value="$(find iftd_detector)/output"/>
 
   <group if="$(arg rviz)">

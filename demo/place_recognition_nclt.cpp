@@ -24,6 +24,50 @@ std::vector<float> read_lidar_data(const std::string lidar_data_path) {
   return lidar_data_buffer;
 }
 
+struct PointXYZIL {
+    float x;
+    float y;
+    float z;
+    uint8_t intensity;
+    uint8_t laser_id;
+};
+
+std::vector<PointXYZIL> read_nclt_lidar_bin(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    std::vector<PointXYZIL> cloud;
+
+    if (!file.is_open()) {
+        std::cerr << "无法打开文件: " << path << std::endl;
+        return cloud;
+    }
+
+    const float scaling = 0.005f;
+    const float offset = -100.0f;
+
+    while (!file.eof()) {
+        uint16_t x_raw, y_raw, z_raw;
+        uint8_t intensity, laser_id;
+
+        file.read(reinterpret_cast<char*>(&x_raw), sizeof(uint16_t));
+        if (file.eof()) break;
+        file.read(reinterpret_cast<char*>(&y_raw), sizeof(uint16_t));
+        file.read(reinterpret_cast<char*>(&z_raw), sizeof(uint16_t));
+        file.read(reinterpret_cast<char*>(&intensity), sizeof(uint8_t));
+        file.read(reinterpret_cast<char*>(&laser_id), sizeof(uint8_t));
+
+        PointXYZIL pt;
+        pt.x = x_raw * scaling + offset;
+        pt.y = y_raw * scaling + offset;
+        pt.z = z_raw * scaling + offset;
+        pt.intensity = intensity;
+        pt.laser_id = laser_id;
+
+        cloud.push_back(pt);
+    }
+
+    return cloud;
+}
+
 int main(int argc, char **argv) {
   ros::init(argc, argv, "demo_kitti");
   ros::NodeHandle nh;
@@ -34,6 +78,9 @@ int main(int argc, char **argv) {
   nh.param<std::string>("lidar_path", lidar_path, "");
   nh.param<std::string>("pose_path", pose_path, "");
   nh.param<std::string>("output_path", output_path, "");
+  int TP = 0;
+  int FP = 0;
+  int FN = 0;
 
   ConfigSetting config_setting;
   read_parameters(nh, config_setting);
@@ -58,8 +105,11 @@ int main(int argc, char **argv) {
 
   std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> poses_vec,poses_vec_;
   std::vector<double> times_vec,times_vec_;
-  load_pose_with_time(pose_path, poses_vec_, times_vec_);
-  std::cout << "Sucessfully load pose with number: " << poses_vec_.size()
+  // load_pose_with_time(pose_path, poses_vec_, times_vec_);
+  // std::cout << "Sucessfully load pose with number: " << poses_vec_.size()
+  //           << std::endl;
+  load_pose_with_time(pose_path, poses_vec, times_vec);
+  std::cout << "Sucessfully load pose with number: " << poses_vec.size()
             << std::endl;
 
   IFTDescManager *std_manager = new IFTDescManager(config_setting);
@@ -76,32 +126,35 @@ int main(int argc, char **argv) {
   int triggle_loop_num = 0;
   int num = 0;
 
-  std::vector<std::string> bin_files_,bin_files;
-  boost::filesystem::directory_iterator end_itr; // Default ctor yields past-the-end
-  for (boost::filesystem::directory_iterator itr(lidar_path); itr != end_itr; ++itr)
-  {
-    if (itr->path().extension() == ".bin")
-    {
-      bin_files_.push_back(itr->path().stem().string());
-    }
-  }
-  auto compare = [](const std::string &a, const std::string &b)
-  {
-    double num_a = std::stod(a);
-    double num_b = std::stod(b);
-    return num_a < num_b;
-  };
-  std::sort(bin_files_.begin(), bin_files_.end(), compare);
+  // std::vector<std::string> bin_files_,bin_files;
+  // boost::filesystem::directory_iterator end_itr; // Default ctor yields past-the-end
+  // for (boost::filesystem::directory_iterator itr(lidar_path); itr != end_itr; ++itr)
+  // {
+  //   if (itr->path().extension() == ".bin")
+  //   {
+  //     bin_files_.push_back(itr->path().stem().string());
+  //   }
+  // }
+  // auto compare = [](const std::string &a, const std::string &b)
+  // {
+  //   double num_a = std::stod(a);
+  //   double num_b = std::stod(b);
+  //   return num_a < num_b;
+  // };
+  // std::sort(bin_files_.begin(), bin_files_.end(), compare);
 
-  pose_bin_timestamp_align(bin_files_,bin_files, poses_vec, times_vec, poses_vec_, times_vec_, time_unit);
-  std::cout << "bin_files_ size: " << bin_files_.size() << " poses_vec_ size: " << poses_vec_.size() << std::endl;
-  std::cout << "bin_files size: " << bin_files.size() << " poses_vec size: " << poses_vec.size() << std::endl;
+  // pose_bin_timestamp_align(bin_files_,bin_files, poses_vec, times_vec, poses_vec_, times_vec_, time_unit);
+  // std::cout << "bin_files_ size: " << bin_files_.size() << " poses_vec_ size: " << poses_vec_.size() << std::endl;
+  // std::cout << "bin_files size: " << bin_files.size() << " poses_vec size: " << poses_vec.size() << std::endl;
 
   while (ros::ok()) {
     std::stringstream lidar_data_path;
-    lidar_data_path << lidar_path  <<  bin_files[cloudInd] << ".bin";
+    // lidar_data_path << lidar_path  <<  bin_files[cloudInd] << ".bin";
+    lidar_data_path << lidar_path << std::setfill('0') << std::setw(6)
+                    << cloudInd << ".bin";
     std::cout << lidar_data_path.str() << std::endl;
     std::vector<float> lidar_data = read_lidar_data(lidar_data_path.str());
+    // std::vector<PointXYZIL> lidar_data = read_nclt_lidar_bin(lidar_data_path.str());
 
     Eigen::Vector3d translation_l2b(0.112, 0.176, -0.247);
     Eigen::Matrix3d rotation_l2b;
@@ -110,22 +163,37 @@ int main(int argc, char **argv) {
     if (lidar_data.size() == 0) {
       break;
     }
+    // std::cout<< "lidar_size: "<< lidar_data.size()<<std::endl;
     pcl::PointCloud<pcl::PointXYZI>::Ptr current_cloud(
         new pcl::PointCloud<pcl::PointXYZI>());
     Eigen::Vector3d translation = poses_vec[cloudInd].first;
     Eigen::Matrix3d rotation = poses_vec[cloudInd].second;
+
+    // for (int i = 0; i < lidar_data.size(); ++i) {
+    //     const auto& pt = lidar_data[i];
+    //     pcl::PointXYZI point;
+    //     point.x = pt.x;
+    //     point.y = pt.y;
+    //     point.z = pt.z;
+    //     point.intensity = pt.intensity;
+    //     Eigen::Vector3d pv = point2vec(point);
+    //     pv = rotation_l2b * pv + translation_l2b;
+    //     pv = rotation * pv + translation;
+    //     point = vec2point(pv);
+    //     current_cloud->push_back(point);
+    // }
 
     for (std::size_t i = 0; i < lidar_data.size(); i += 3) {
       pcl::PointXYZI point;
       point.x = lidar_data[i];
       point.y = lidar_data[i + 1];
       point.z = lidar_data[i + 2];
-      point.intensity = 0.0;
+      point.intensity = lidar_data[i + 3];
 
-      Eigen::Vector3d pv = point2vec(point);
-      pv = rotation_l2b * pv + translation_l2b;
-      pv = rotation * pv + translation;
-      point = vec2point(pv);
+      // Eigen::Vector3d pv = point2vec(point);
+      // pv = rotation_l2b * pv + translation_l2b;
+      // pv = rotation * pv + translation;
+      // point = vec2point(pv);
       current_cloud->push_back(point);
     }
 
@@ -165,12 +233,22 @@ int main(int argc, char **argv) {
         std::cout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
                   << search_result.first << ", score:" << search_result.second
                   << std::endl;
+        int source = config_setting.sub_frame_num_ * (static_cast<int>(keyCloudInd) + 1);
+        int target = config_setting.sub_frame_num_ * (search_result.first + 1);
+        std::cout << "loop id:"<< source <<"-"<< target<<std::endl;
+        double loop_distance = (poses_vec[source].first - poses_vec[target].first).norm();
+        if(loop_distance <= 15){
+          TP++;
+        }
+        else{
+          FP++;
+        }
       }
 
-      double cloudIndDouble = static_cast<double>(std::stod(bin_files[cloudInd])/time_unit);
-      std::ofstream foutC(std::string(output_path + "/loop.txt"), std::ios::app);
-      foutC << std::fixed << cloudIndDouble << " " << keyCloudInd << " " << search_result.first << std::endl;
-      foutC.close();
+      // double cloudIndDouble = static_cast<double>(std::stod(bin_files[cloudInd])/time_unit);
+      // std::ofstream foutC(std::string(output_path + "/loop.txt"), std::ios::app);
+      // foutC << std::fixed << cloudIndDouble << " " << keyCloudInd << " " << search_result.first << std::endl;
+      // foutC.close();
 
       auto t_query_end = std::chrono::high_resolution_clock::now();
       querying_time.push_back(time_inc(t_query_end, t_query_begin));
@@ -237,7 +315,7 @@ int main(int argc, char **argv) {
     pubOdomAftMapped.publish(odom);
     loop.sleep();
     cloudInd++;
-    if(cloudInd == bin_files.size())
+    if(cloudInd == poses_vec.size())
     {
       break;
     }
@@ -259,5 +337,7 @@ int main(int argc, char **argv) {
             << "ms, update: " << mean_update_time << "ms, total: "
             << mean_descriptor_time + mean_query_time + mean_update_time << "ms"
             << std::endl;
+  std::cout << "TP: "<< TP<<", FP："<< FP<<std::endl;
+  std::cout << "P: "<< TP * 1.0/(TP + FP);
   return 0;
 }

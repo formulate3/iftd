@@ -46,8 +46,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}   ${OpenMP_C_FLAGS}")
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED)
 find_package(Ceres REQUIRED)
+#注释于7.30
 find_package(GTSAM REQUIRED QUIET)
-
+# set(GTSAM_DIR /home/tkw/seu_clean_robot/seu_clean_robot_env/gtsam-4.0.3-install/lib/cmake/GTSAM)
+# find_package(GTSAM REQUIRED)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -85,3 +87,10 @@ target_link_libraries(place_recognition_nclt
         ${OpenCV_LIBS} 
         ${CERES_LIBRARIES})
 
+# add_executable(pgo_demo demo/pgo_demo.cpp src/IFTDesc.cpp )
+# target_link_libraries(pgo_demo 
+#         ${catkin_LIBRARIES} 
+#         ${PCL_LIBRARIES} 
+#         ${OpenCV_LIBS} 
+#         ${CERES_LIBRARIES}
+#         gtsam)

@@ -189,42 +189,41 @@ int main(int argc, char **argv) {
         int max_count = 0;
         double mean_density1 = 0, mean_density2 = 0;
         double mean_attach1 = 0, mean_attach2 = 0;
+        double var_attach1 = 0, var_attach2 = 0;
         for (auto pair : loop_std_pair){
             if(max_count >= 20) break;
             max_count ++;
-            mean_attach1 += pair.first.vertex_attached_.norm();
-            mean_attach2 += pair.second.vertex_attached_.norm();
-            mean_density1 += (pair.first.density_mean.x() + pair.first.density_mean.y() + pair.first.density_mean.z());
-            mean_density2 += (pair.second.density_mean.x() + pair.second.density_mean.y() + pair.second.density_mean.z());
+            mean_attach1 += (pair.first.mean_var_A.x() + pair.first.mean_var_B.x() + pair.first.mean_var_C.x())/3;
+            var_attach1 += (pair.first.mean_var_A.y() + pair.first.mean_var_B.y() + pair.first.mean_var_C.y())/3;
+            mean_attach2 += (pair.second.mean_var_A.x() + pair.second.mean_var_B.x() + pair.second.mean_var_C.x())/3;
+            var_attach2 += (pair.second.mean_var_A.y() + pair.second.mean_var_B.y() + pair.second.mean_var_C.y())/3;
+            mean_density1 += (pair.first.density_mean.x() + pair.first.density_mean.y() + pair.first.density_mean.z())/3;
+            mean_density2 += (pair.second.density_mean.x() + pair.second.density_mean.y() + pair.second.density_mean.z())/3;
         }
         if(max_count==0){
             mean_attach1 = -1;
+            var_attach1 = -1;
             mean_attach2 = -1;
+            var_attach2 = -1;
             mean_density1 = -1;
             mean_density2 = -1;
         }
         else{
             mean_attach1 = mean_attach1/max_count;
-            mean_attach2 = mean_attach1/max_count;
+            var_attach1 = var_attach1/max_count;
+            mean_attach2 = mean_attach2/max_count;
+            var_attach2 = var_attach2/max_count;
             mean_density1 = mean_density1/max_count;
             mean_density2 = mean_density2/max_count;
         }
-        ///add for wass
-        double wass1 = 0, wass2 = 0, wass3 = 0;
-        for(auto pair : loop_std_pair){
-            wass1 += computeWassersteinDistance(pair.first.density_A, pair.second.density_A);
-            wass2 += computeWassersteinDistance(pair.first.density_B, pair.second.density_B);
-            wass3 += computeWassersteinDistance(pair.first.density_C, pair.second.density_C);
-            break;
-        }
 
-        std::ofstream out_density(std::string(output_path + "/density.txt"), std::ios::app);
-        out_density << static_cast<double>(cloudInd) << " "<< keyCloudInd <<
-        ", size: "<< loop_std_pair.size() <<", density: "<< mean_density1 <<
-        ", "<<mean_density2<<", attach:"<< mean_attach1 << ", "<< mean_attach2
-        <<"wass: "<< wass1 <<", "<< wass2 <<", "<< wass3
-        <<", distance: "<< loop_distance << std::endl;
-        out_density.close();
+        // std::ofstream out_density(std::string(output_path + "/density.txt"), std::ios::app);
+        // out_density << source << " "<< target <<
+        // ", size: "<< loop_std_pair.size() <<", density: "<< mean_density1 <<
+        // ", "<<mean_density2<<", score:"<< mean_attach1 << ", "<< mean_attach2
+        // <<", entropy: "<< var_attach1 <<", "<< var_attach2
+        // <<", distance: "<< loop_distance << std::endl;
+        // out_density.close();
       }
 
       double cloudIndDouble = static_cast<double>(cloudInd);
@@ -299,6 +298,28 @@ int main(int argc, char **argv) {
     loop.sleep();
     cloudInd++;
   }
+
+  //my add
+  // 检查三个vector大小是否一致
+  if (descriptor_time.size() != querying_time.size() || descriptor_time.size() != update_time.size()) 
+  {
+    std::cerr << "Error: Vectors are not of the same size." << std::endl;
+    return -1;
+  }
+  // 打开文件以写入
+  std::ofstream outfile("/home/tkw/IFTD/src/iftd/dtd_times.txt");
+  if (!outfile.is_open()) {
+    std::cerr << "Failed to open file for writing!" << std::endl;
+    return -1;
+  }
+  // 相加并写入文件
+  for (size_t i = 0; i < descriptor_time.size(); ++i) {
+    double total = descriptor_time[i] + querying_time[i] + update_time[i];
+    outfile << total << std::endl;
+  }
+  outfile.close();
+  std::cout << "Saved total times to total_times.txt" << std::endl;
+
   double mean_descriptor_time =
       std::accumulate(descriptor_time.begin(), descriptor_time.end(), 0) * 1.0 /
       descriptor_time.size();

@@ -16,7 +16,7 @@ Density_threshold: 0.05
 use_global_bev: false
 
 #
-image_quartity: 0.1
+image_quartity: 0.05
 Hamming_distance: 10
 
 # std descriptor
@@ -28,11 +28,11 @@ std_side_resolution: 0.2
 # candidate search
 skip_near_num: 50
 candidate_num: 50
-sub_frame_num: 5
-vertex_diff_threshold: 0.95
+sub_frame_num: 10
+vertex_diff_threshold: 0.9
 rough_dis_threshold: 0.01
 image_reseize: 20 #20
 distance_threshold: 15
-image_threshold: 0.2
-density_diff_threshold: 0.4
+image_threshold: 0.9
+density_diff_threshold: 0.2
 

@@ -209,6 +209,7 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   nh.param<double>("distance_threshold",config_setting.distance_threshold_, 15.0);
   nh.param<double>("image_threshold", config_setting.image_threshold_, 0.2);
   nh.param<double>("density_diff_threshold", config_setting.density_diff_threshold, 0.1);
+  nh.param<int>("vote_num",config_setting.vote_num, 5);
 
   std::cout << "Sucessfully load parameters:" << std::endl;
   std::cout << "----------------Main Parameters-------------------" << std::endl;
@@ -228,6 +229,7 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   std::cout << "distance threshold: " << config_setting.distance_threshold_ << std::endl;
   std::cout << "descriptor_near_num: " << config_setting.descriptor_near_num_ << std::endl;
   std::cout << "density_diff_threshold: "<< config_setting.density_diff_threshold << std::endl;
+  std::cout << "vote_num: "<< config_setting.vote_num << std::endl;
 }
 
 void load_pose_with_time(
@@ -579,14 +581,14 @@ void publish_std_pairs(
 
       double entropy = (1/2.0) * (1 + std::log(2 * M_PI)) + 0.5 * std::log(z_variance);
       double score = 0;
-      if(filtered_z.size() > 0){
-          for (double z : filtered_z) {
-              double gaussian_value = -0.5 * (z - z_mean) * (z - z_mean) / z_variance;
-              score += std::exp(gaussian_value);
-          }
-          ///不一定需要这个
-//          score = score / filtered_z.size();
-      }
+      // if(filtered_z.size() > 0){
+      //     for (double z : filtered_z) {
+      //         double gaussian_value = -0.5 * (z - z_mean) * (z - z_mean) / z_variance;
+      //         score += std::exp(gaussian_value);
+      //     }
+      //     ///不一定需要这个
+      //     score = score / filtered_z.size();
+      // }
 
       // //下面是要存储周围3*3方格内的密度
       // const int dy[] = {-1, -1, 0, 1, 1, 1, 0, -1}; // 左, 左上, 上, 右上, 右, 右下, 下, 左下
@@ -610,17 +612,18 @@ void publish_std_pairs(
       Eigen::Vector2i pos(x, y);
       //本来最后两个是z_mean和z_variance，现在分别换为概率密度得分和熵
 //      CornerDescriptor descriptor(point, neighborhood, pos, z_mean, z_variance);
-      CornerDescriptor descriptor(point, neighborhood, pos, score, entropy);
+      // CornerDescriptor descriptor(point, neighborhood, pos, score, entropy);
+      CornerDescriptor descriptor(point, pos, score, entropy);
       corner_data.push_back(descriptor);
 
       ///增加用来可视化的
-      cv::circle(BEV_Image_Pixel_copy, corner, 3, cv::Scalar(0, 0, 255), 2);
+      // cv::circle(BEV_Image_Pixel_copy, corner, 3, cv::Scalar(0, 0, 255), 2);
   }
 
   corner_cloud_vec_.push_back(corner_points);
   ///增加用来可视化
-//  std::string bev_with_corners_filename = "/home/tkw/IFTD/src/iftd/img/"+ std::to_string(num) + "_corners.png";
-//  cv::imwrite(bev_with_corners_filename, BEV_Image_Pixel_copy);
+  // std::string bev_with_corners_filename = "/home/tkw/IFTD/src/iftd/img/"+ std::to_string(num) + "_corners.png";
+  // cv::imwrite(bev_with_corners_filename, BEV_Image_Pixel_copy);
 
   // std::cout << "[Description] corners size:" << corner_points->size()
             // << std::endl;
@@ -881,7 +884,7 @@ void IFTDescManager::SearchLoop(
   //           << " ms, candidate verify: " << time_inc(t3, t2) << "ms"
   //           << std::endl;
 
-  if (best_score > config_setting_.image_threshold_)
+  if (best_score > config_setting_.density_diff_threshold)
   {
     loop_result = std::pair<int, double>(best_candidate_id, best_score);
     loop_transform = best_transform;
@@ -933,8 +936,8 @@ void IFTDescManager::SearchLoop(
     double verify_score = image_similarity_verify(current_frame_id_, history_frame_id, relative_rot, relative_t);
 
     // if (verify_score > config_setting_.image_threshold_)
-//    if (verify_score > config_setting_.image_threshold_ && relative_t.norm() < config_setting_.distance_threshold_) //distance threshold
-    if (relative_t.norm() < config_setting_.distance_threshold_)
+    if (verify_score > config_setting_.image_threshold_ && relative_t.norm() < config_setting_.distance_threshold_) //distance threshold
+    // if (relative_t.norm() < config_setting_.distance_threshold_)
     {
       loop_result = std::pair<int, double>(history_frame_id, verify_score);
       loop_transform = std::pair<Eigen::Vector3d, Eigen::Matrix3d>(relative_t, relative_rot);
@@ -1014,7 +1017,7 @@ void IFTDescManager::build_IFTDesc(
   for (size_t i = 0; i < corner_data.size(); i++) {
 
     const auto &searchPoint = corner_data[i].point;
-    const auto &searchDensity = corner_data[i].neighborhood_density;  // 当前点的密度值描述
+    // const auto &searchDensity = corner_data[i].neighborhood_density;  // 当前点的密度值描述
     const auto &searchPos = corner_data[i].position;
     Eigen::Vector2d searchZ(corner_data[i].mean_z, corner_data[i].var_z);
     if (kd_tree->nearestKSearch(searchPoint, near_num, pointIdxNKNSearch,
@@ -1024,9 +1027,9 @@ void IFTDescManager::build_IFTDesc(
           pcl::PointXYZINormal p1 = searchPoint;
           pcl::PointXYZINormal p2 = corner_data[pointIdxNKNSearch[m]].point;
           pcl::PointXYZINormal p3 = corner_data[pointIdxNKNSearch[n]].point;
-          std::array<int, 9> d1 = searchDensity;
-          std::array<int, 9> d2 = corner_data[pointIdxNKNSearch[m]].neighborhood_density;
-          std::array<int, 9> d3 = corner_data[pointIdxNKNSearch[n]].neighborhood_density;
+          // std::array<int, 9> d1 = searchDensity;
+          // std::array<int, 9> d2 = corner_data[pointIdxNKNSearch[m]].neighborhood_density;
+          // std::array<int, 9> d3 = corner_data[pointIdxNKNSearch[n]].neighborhood_density;
           Eigen::Vector2i pos1 = searchPos;
           Eigen::Vector2i pos2 = corner_data[pointIdxNKNSearch[m]].position;
           Eigen::Vector2i pos3 = corner_data[pointIdxNKNSearch[n]].position;
@@ -1104,9 +1107,9 @@ void IFTDescManager::build_IFTDesc(
           VOXEL_LOC position((int64_t)d_p.x, (int64_t)d_p.y, (int64_t)d_p.z);
           auto iter = feat_map.find(position);
           Eigen::Vector3d normal_1, normal_2, normal_3;
-          std::array<int, 9> density_A = {0};
-          std::array<int, 9> density_B = {0};
-          std::array<int, 9> density_C = {0};
+          // std::array<int, 9> density_A = {0};
+          // std::array<int, 9> density_B = {0};
+          // std::array<int, 9> density_C = {0};
           Eigen::Vector2d mean_var_A(0, 0);
           Eigen::Vector2d mean_var_B(0, 0);
           Eigen::Vector2d mean_var_C(0, 0);
@@ -1116,57 +1119,57 @@ void IFTDescManager::build_IFTDesc(
               A << p1.x, p1.y, p1.z;
               // normal_1 << p1.normal_x, p1.normal_y, p1.normal_z;
               vertex_attached[0] = p1.intensity;
-              density_A = d1;
+              // density_A = d1;
               mean_var_A = z1;
             } else if (l1[1] == l2[1]) {
               A << p2.x, p2.y, p2.z;
               // normal_1 << p2.normal_x, p2.normal_y, p2.normal_z;
               vertex_attached[0] = p2.intensity;
-              density_A = d2;
+              // density_A = d2;
               mean_var_A = z2;
             } else {
               A << p3.x, p3.y, p3.z;
               // normal_1 << p3.normal_x, p3.normal_y, p3.normal_z;
               vertex_attached[0] = p3.intensity;
-              density_A = d3;
+              // density_A = d3;
               mean_var_A = z3;
             }
             if (l1[0] == l3[0]) {
               B << p1.x, p1.y, p1.z;
               // normal_2 << p1.normal_x, p1.normal_y, p1.normal_z;
               vertex_attached[1] = p1.intensity;
-              density_B = d1;
+              // density_B = d1;
               mean_var_B = z1;
             } else if (l1[1] == l3[1]) {
               B << p2.x, p2.y, p2.z;
               // normal_2 << p2.normal_x, p2.normal_y, p2.normal_z;
               vertex_attached[1] = p2.intensity;
-              density_B = d2;
+              // density_B = d2;
               mean_var_B = z2;
             } else {
               B << p3.x, p3.y, p3.z;
               // normal_2 << p3.normal_x, p3.normal_y, p3.normal_z;
               vertex_attached[1] = p3.intensity;
-              density_B = d3;
+              // density_B = d3;
               mean_var_B = z3;
             }
             if (l2[0] == l3[0]) {
               C << p1.x, p1.y, p1.z;
               // normal_3 << p1.normal_x, p1.normal_y, p1.normal_z;
               vertex_attached[2] = p1.intensity;
-              density_C = d1;
+              // density_C = d1;
               mean_var_C = z1;
             } else if (l2[1] == l3[1]) {
               C << p2.x, p2.y, p2.z;
               // normal_3 << p2.normal_x, p2.normal_y, p2.normal_z;
               vertex_attached[2] = p2.intensity;
-              density_C = d2;
+              // density_C = d2;
               mean_var_C = z2;
             } else {
               C << p3.x, p3.y, p3.z;
               // normal_3 << p3.normal_x, p3.normal_y, p3.normal_z;
               vertex_attached[2] = p3.intensity;
-              density_C = d3;
+              // density_C = d3;
               mean_var_C = z3;
             }
             IFTDesc single_descriptor;
@@ -1183,13 +1186,13 @@ void IFTDescManager::build_IFTDesc(
             single_descriptor.angle_[1] = angle_b;
             single_descriptor.angle_[2] = angle_c;
 
-            single_descriptor.density_A = density_A;
-            single_descriptor.density_B = density_B;
-            single_descriptor.density_C = density_C;
+            // single_descriptor.density_A = density_A;
+            // single_descriptor.density_B = density_B;
+            // single_descriptor.density_C = density_C;
 
-            single_descriptor.density_mean[0] = std::accumulate(density_A.begin(), density_A.end(), 0.0) / density_A.size();
-            single_descriptor.density_mean[1] = std::accumulate(density_B.begin(), density_B.end(), 0.0) / density_B.size();
-            single_descriptor.density_mean[2] = std::accumulate(density_C.begin(), density_C.end(), 0.0) / density_C.size();
+            // single_descriptor.density_mean[0] = std::accumulate(density_A.begin(), density_A.end(), 0.0) / density_A.size();
+            // single_descriptor.density_mean[1] = std::accumulate(density_B.begin(), density_B.end(), 0.0) / density_B.size();
+            // single_descriptor.density_mean[2] = std::accumulate(density_C.begin(), density_C.end(), 0.0) / density_C.size();
 
             int x_center = static_cast<int>(std::round((pos1.x() + pos2.x() + pos3.x())/3.0));
             int y_center = static_cast<int>(std::round((pos1.y() + pos2.y() + pos3.y())/3.0));
@@ -1330,8 +1333,8 @@ void IFTDescManager::candidate_selector(
 //                  double vertex_attach_diff = 1.0 * cosineSimilarity(mean_now, mean_old) + 0.0 * cosineSimilarity(var_now, var_old);
 
                   //5 联合密度和熵的余弦相似度
-                  Eigen::Vector3d mean_now(src_std.vertex_attached_.x(), src_std.vertex_attached_.y(), src_std.vertex_attached_.z());
-                  Eigen::Vector3d mean_old(data_base_[position][j].vertex_attached_.x(), data_base_[position][j].vertex_attached_.y(), data_base_[position][j].vertex_attached_.z());
+                  // Eigen::Vector3d mean_now(src_std.vertex_attached_.x(), src_std.vertex_attached_.y(), src_std.vertex_attached_.z());
+                  // Eigen::Vector3d mean_old(data_base_[position][j].vertex_attached_.x(), data_base_[position][j].vertex_attached_.y(), data_base_[position][j].vertex_attached_.z());
                   Eigen::Vector3d var_now(src_std.mean_var_A.y(), src_std.mean_var_B.y(), src_std.mean_var_C.y());
                   Eigen::Vector3d var_old(data_base_[position][j].mean_var_A.y(), data_base_[position][j].mean_var_B.y(), data_base_[position][j].mean_var_C.y());
                   // double vertex_attach_diff = 0.3 * cosineSimilarity(mean_now, mean_old) + 0.7 * cosineSimilarity(var_now, var_old);
@@ -1481,7 +1484,8 @@ void IFTDescManager::candidate_verify(
     }
   }
 
-  if (max_vote >= 5 && vertex_num >= 6 ) 
+  if (max_vote >= config_setting_.vote_num)
+  // if (max_vote >= 5 && vertex_num >= 6 ) 
   {
     auto best_pair = candidate_matcher.match_list_[max_vote_index * skip_len];
     int vote = 0;
@@ -1516,12 +1520,13 @@ void IFTDescManager::candidate_verify(
         num_success += 1;
       }
     }
-    new_score = new_score/candidate_matcher.match_list_.size();
-    new_score = 1/new_score;
+    // new_score = new_score/candidate_matcher.match_list_.size();
+    // new_score = 1/new_score;
+    new_score = 1.0 * num_success;
 
-//    verify_score = new_score;
+    verify_score = new_score;
 //    verify_score = num_success/(1.0 * candidate_matcher.match_list_.size());
-    verify_score = image_similarity_verify(candidate_matcher.match_id_.first, candidate_matcher.match_id_.second,best_rot, best_t);
+    // verify_score = image_similarity_verify(candidate_matcher.match_id_.first, candidate_matcher.match_id_.second,best_rot, best_t);
   } 
   else 
   {

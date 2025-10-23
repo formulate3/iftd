@@ -147,12 +147,15 @@ int main(int argc, char **argv) {
   // std::cout << "bin_files_ size: " << bin_files_.size() << " poses_vec_ size: " << poses_vec_.size() << std::endl;
   // std::cout << "bin_files size: " << bin_files.size() << " poses_vec size: " << poses_vec.size() << std::endl;
 
+  //1023add: quick plot pr
+  std::vector<std::pair<double, bool>> result_list;
+
   while (ros::ok()) {
     std::stringstream lidar_data_path;
     // lidar_data_path << lidar_path  <<  bin_files[cloudInd] << ".bin";
     lidar_data_path << lidar_path << std::setfill('0') << std::setw(6)
                     << cloudInd << ".bin";
-    std::cout << lidar_data_path.str() << std::endl;
+    // std::cout << lidar_data_path.str() << std::endl;
     std::vector<float> lidar_data = read_lidar_data(lidar_data_path.str());
     // std::vector<PointXYZIL> lidar_data = read_nclt_lidar_bin(lidar_data_path.str());
 
@@ -183,17 +186,20 @@ int main(int argc, char **argv) {
     //     current_cloud->push_back(point);
     // }
 
-    for (std::size_t i = 0; i < lidar_data.size(); i += 3) {
+    //1022change: i += 3 -> 4
+    for (std::size_t i = 0; i < lidar_data.size(); i += 4) {
       pcl::PointXYZI point;
       point.x = lidar_data[i];
       point.y = lidar_data[i + 1];
       point.z = lidar_data[i + 2];
       point.intensity = lidar_data[i + 3];
 
+      //1022，不注释这部分会导致检测不到描述子
       // Eigen::Vector3d pv = point2vec(point);
       // pv = rotation_l2b * pv + translation_l2b;
       // pv = rotation * pv + translation;
       // point = vec2point(pv);
+
       current_cloud->push_back(point);
     }
 
@@ -237,7 +243,11 @@ int main(int argc, char **argv) {
         int target = config_setting.sub_frame_num_ * (search_result.first + 1);
         std::cout << "loop id:"<< source <<"-"<< target<<std::endl;
         double loop_distance = (poses_vec[source].first - poses_vec[target].first).norm();
-        if(loop_distance <= 15){
+        //1023add: quick plot pr
+        bool isTP = loop_distance <= 20;
+        result_list.push_back({search_result.second, isTP});
+
+        if(isTP){
           TP++;
         }
         else{
@@ -270,7 +280,8 @@ int main(int argc, char **argv) {
       pcl::PointCloud<pcl::PointXYZI> save_key_cloud;
       save_key_cloud = *temp_cloud;
 
-      std_manager->key_cloud_vec_.push_back(save_key_cloud.makeShared());
+      //1021delete
+      // std_manager->key_cloud_vec_.push_back(save_key_cloud.makeShared());
 
       // // publish
       std::cout << "publish..." << std::endl;
@@ -282,21 +293,22 @@ int main(int argc, char **argv) {
       pub_cloud.header.frame_id = "camera_init";
       pubCurrentCorner.publish(pub_cloud);
 
-      if (search_result.first > 0) {
-        triggle_loop_num++;
-        pcl::toROSMsg(*std_manager->key_cloud_vec_[search_result.first],
-                      pub_cloud);
-        pub_cloud.header.frame_id = "camera_init";
-        pubMatchedCloud.publish(pub_cloud);
-        slow_loop.sleep();
-        pcl::toROSMsg(*std_manager->corner_cloud_vec_[search_result.first],
-                      pub_cloud);
-        pub_cloud.header.frame_id = "camera_init";
-        pubMatchedCorner.publish(pub_cloud);
-        publish_std_pairs(loop_std_pair, translation, rotation,pubSTD);
-        slow_loop.sleep();
-        // getchar();
-      }
+      //1021delete
+      // if (search_result.first > 0) {
+      //   triggle_loop_num++;
+      //   pcl::toROSMsg(*std_manager->key_cloud_vec_[search_result.first],
+      //                 pub_cloud);
+      //   pub_cloud.header.frame_id = "camera_init";
+      //   pubMatchedCloud.publish(pub_cloud);
+      //   slow_loop.sleep();
+      //   pcl::toROSMsg(*std_manager->corner_cloud_vec_[search_result.first],
+      //                 pub_cloud);
+      //   pub_cloud.header.frame_id = "camera_init";
+      //   pubMatchedCorner.publish(pub_cloud);
+      //   publish_std_pairs(loop_std_pair, translation, rotation,pubSTD);
+      //   slow_loop.sleep();
+      //   // getchar();
+      // }
  
       loop.sleep();     
       temp_cloud->clear();
@@ -321,6 +333,39 @@ int main(int argc, char **argv) {
     }
 
   }
+  //1023add: quick plot pr
+  std::ofstream out_file(std::string(output_path + "/result_map.csv"));
+  std::sort(result_list.begin(), result_list.end());
+  if (out_file.is_open()) {
+    double current_threshold = -1;
+    int tp_count = TP;
+    int fp_count = FP;
+    out_file << 0 << "," << tp_count << "," << fp_count << "\n";
+
+    for (const auto& entry : result_list) {
+      if (entry.first != current_threshold) {
+        // 当阈值改变时输出当前阈值的TP和FP数量
+        if (current_threshold != -1) {
+          out_file << current_threshold << "," << tp_count << "," << fp_count << "\n";
+        }
+        // 更新阈值并重置计数
+        current_threshold = entry.first;
+      }
+      // 输出每个阈值和对应的TP/FP信息
+      // out_file << entry.first << " " << (entry.second ? "true" : "false") << "\n";
+      if(entry.second){
+        tp_count--;
+      }
+      else{
+        fp_count--;
+      }
+    }
+    // 最后输出最后一个阈值的TP和FP数量（当阈值为最小时）
+    out_file << current_threshold << "," << tp_count << "," << fp_count << "\n";
+    out_file.close();
+    std::cout << "Results saved to result_map.txt" << std::endl;
+  }
+
   double mean_descriptor_time =
       std::accumulate(descriptor_time.begin(), descriptor_time.end(), 0) * 1.0 /
       descriptor_time.size();

@@ -50,14 +50,16 @@ struct BEVResult {
 
 struct CornerDescriptor {
     pcl::PointXYZINormal point;   // 点的位置信息
-    std::array<int, 9> neighborhood_density; // 周围9个格子的密度信息
+    // std::array<int, 9> neighborhood_density; // 周围9个格子的密度信息
     Eigen::Vector2i position;
     double mean_z;
     double var_z;
 
     // 构造函数，便于初始化
-    CornerDescriptor(const pcl::PointXYZINormal& pt, const std::array<int, 9>& density, const Eigen::Vector2i& pos, const double& mean, const double& var)
-            : point(pt), neighborhood_density(density), position(pos), mean_z(mean), var_z(var) {}
+    CornerDescriptor(const pcl::PointXYZINormal& pt, const Eigen::Vector2i& pos, const double& mean, const double& var)
+            : point(pt), position(pos), mean_z(mean), var_z(var) {}
+    // CornerDescriptor(const pcl::PointXYZINormal& pt, const std::array<int, 9>& density, const Eigen::Vector2i& pos, const double& mean, const double& var)
+    //         : point(pt), neighborhood_density(density), position(pos), mean_z(mean), var_z(var) {}
 };
 
 typedef struct ConfigSetting {
@@ -94,6 +96,7 @@ typedef struct ConfigSetting {
   double distance_threshold_ = 15;
   double image_threshold_ = 0.2;
   double density_diff_threshold = 0.1;
+  int vote_num = 5;
 
 } ConfigSetting;
 
@@ -318,6 +321,7 @@ public:
     image_quartity = config_setting.image_quartity;
     Hamming_distance = config_setting.Hamming_distance;
     density_diff_threshold = config_setting.density_diff_threshold;
+    vote_num = config_setting.vote_num;
   };
 
   int time_unit;
@@ -333,6 +337,7 @@ public:
   double image_quartity;
   int Hamming_distance;
   double density_diff_threshold;
+  int vote_num;
 
   Eigen::MatrixXi matrix_density;
 

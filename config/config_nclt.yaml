@@ -5,15 +5,15 @@ ds_size: 0.25
 bin_timestamp: 3  # 1 for s, 2 for ms, 3 for us, 4 for ns 
 
 # Bev Image
-BEV_X_NUM: 300
-BEV_Y_NUM: 300
+BEV_X_NUM: 400
+BEV_Y_NUM: 400
 BEV_X_MAX: 50
 BEV_Y_MAX: 50
 lidar_height: 1.5
 height_bin: 0.3
 
 #
-image_quartity: 0.15
+image_quartity: 0.1
 Hamming_distance: 10
 
 # std descriptor
@@ -31,5 +31,5 @@ rough_dis_threshold: 0.01
 image_reseize: 20
 distance_threshold: 15
 image_threshold: 0
-density_diff_threshold: 0.2
-
+density_diff_threshold: 0
+vote_num: 4

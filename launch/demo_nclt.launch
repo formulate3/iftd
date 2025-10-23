@@ -13,8 +13,9 @@
   <param name="pose_path" type="string" value = "/home/lang/docker_20.04_data/nclt/fast-lio-pose/2012-05-26.txt"/> -->
   <!-- <param name="lidar_path" type="string" value = "/media/tkw/新加卷/data/NCLT/2012-05-26_vel/2012-05-26/velodyne_sync/"/>
   <param name="pose_path" type="string" value = "/home/tkw/LunWenRelated/NCLT_TUM/3.txt"/> -->
-  <param name="lidar_path" type="string" value = "/media/tkw/新加卷/data/NCLT_FASTLIO/2012-05-26/BIN/"/>
-  <param name="pose_path" type="string" value = "/media/tkw/新加卷/data/NCLT_FASTLIO/2012-05-26/poses.txt"/>
+  <param name="lidar_path" type="string" value = "/media/tkw/新加卷/data/NCLT_FASTLIO_NEW/2012-05-26/BIN/"/>
+  <param name="pose_path" type="string" value = "/media/tkw/新加卷/data/NCLT_FASTLIO_NEW/2012-05-26/poses.txt"/>
+  <param name="output_path" type="string" value="$(find iftd_detector)/output"/>
 
 
   <group if="$(arg rviz)">
